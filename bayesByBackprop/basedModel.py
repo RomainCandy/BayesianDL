@@ -23,22 +23,6 @@ class BayesianNN(nn.Module):
                 raise AttributeError(f"{module} must be BayesianNN")
             module.mle = mle
         self._mle = mle
-        # if mle:
-        #     self._samples = 1
-
-    # @property
-    # def samples(self):
-    #     return self._samples
-    #
-    # @samples.setter
-    # def samples(self, sample):
-    #     for module in self._modules.values():
-    #         if not isinstance(module, BayesianNN):
-    #             raise AttributeError("Module must be BayesianNN")
-    #         module.samples = sample
-    #     self._samples = sample
-    #     if sample > 1:
-    #         self.mle = False
 
     def forward(self, x, kl):
         raise NotImplemented
@@ -88,16 +72,11 @@ class BayesianSequential(nn.Sequential, BayesianNN):
         for module in self._modules.values():
             if not isinstance(module, BayesianNN):
                 raise AttributeError(f"{module}  must be BayesianNN")
-        # self.samples = samples
-        # self._mle = False
 
     def forward(self, x, kl):
         for module in self._modules.values():
             x, kl = module(x, kl)
         return x, kl
-
-    # def extra_repr(self):
-    #     return 'samples={_samples}'.format(**self.__dict__)
 
 
 class BayesianMaxPool2d(nn.modules.pooling._MaxPoolNd, BayesianNN):
@@ -184,7 +163,6 @@ class _BatchNormBayesian(BayesianNN):
         exponential_average_factor = 0.0
 
         if self.training and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
                 self.num_batches_tracked += 1
                 if self.momentum is None:  # use cumulative moving average
@@ -239,7 +217,6 @@ class BatchNorm2DF(nn.BatchNorm2d, BayesianNN):
         exponential_average_factor = 0.0
 
         if self.training and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
                 self.num_batches_tracked += 1
                 if self.momentum is None:  # use cumulative moving average
@@ -324,13 +301,6 @@ class BayesianLinear(BayesianNN):
             _kl = (log_var_post - log_prior).sum()
             return out, kl + _kl
 
-    # def forward(self, x, kl):
-    #     batch_size = x.size(0)
-    #     outputs = torch.zeros(self.samples, batch_size, self.n_out)
-    #     kls = torch.zeros(self.samples)
-    #     for i in range(self.samples):
-    #         outputs[i], kls[i] = self.fcprobforward(x, kl)
-    #     return outputs.mean(0), kls.mean(0) + kl
     def forward(self, x, kl):
         return self.fcprobforward(x, kl)
 
@@ -423,14 +393,6 @@ class BayesianConv2d(_BayesianConvnd):
         _kl = (log_var_post - log_prior).sum()
         return out, kl + _kl
 
-    # def forward(self, x, kl):
-    #     kls = torch.zeros(self.samples)
-    #     output, kll = self.convprobforward(x)
-    #     outputs = torch.zeros(self.samples, *output.size())
-    #     outputs[0], kls[0] = output, kll
-    #     for i in range(1, self.samples):
-    #         outputs[i], kls[i] = self.convprobforward(x)
-    #     return outputs.mean(0), kls.mean(0) + kl
     def forward(self, x, kl):
         return self.convprobforward(x, kl)
 
@@ -443,5 +405,3 @@ class GaussianVariationalInference(nn.Module):
     def forward(self, logits, y, kl, beta):
         loss = self.loss(logits, y) + beta*kl
         return loss
-
-

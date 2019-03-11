@@ -21,7 +21,6 @@ class NormalPosterior(Posterior):
     @property
     def sigma(self):
         return torch.log1p(self.rho.exp())
-        # return self.rho
 
     def sample(self):
         eps = self.normal.sample(self.rho.shape)
