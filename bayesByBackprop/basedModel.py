@@ -94,7 +94,7 @@ class _BatchNormBayesian(BayesianNN):
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
                      'running_mean', 'running_var', 'num_batches_tracked']
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, num_features, device, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, pi=.5, sigma1=math.exp(0), sigma2=math.exp(-6)):
         super().__init__()
         self.num_features = num_features
@@ -105,15 +105,15 @@ class _BatchNormBayesian(BayesianNN):
         self.pi = pi
         self.sigma1 = sigma1
         self.sigma2 = sigma2
-        self.prior = ScaleMixtureGaussian(pi=self.pi, sigma1=self.sigma1, sigma2=self.sigma2)
+        self.prior = ScaleMixtureGaussian(pi=self.pi, sigma1=self.sigma1, sigma2=self.sigma2, device=device)
 
         if self.affine:
-            self.weight_mean = nn.Parameter(torch.Tensor(num_features))
-            self.weight_logvar = nn.Parameter(torch.Tensor(num_features))
-            self.weight = NormalPosterior(self.weight_mean, self.weight_logvar)
-            self.bias_mean = nn.Parameter(torch.Tensor(num_features))
-            self.bias_logvar = nn.Parameter(torch.Tensor(num_features))
-            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar)
+            self.weight_mean = nn.Parameter(torch.Tensor(num_features).to(device))
+            self.weight_logvar = nn.Parameter(torch.Tensor(num_features).to(device))
+            self.weight = NormalPosterior(self.weight_mean, self.weight_logvar, device)
+            self.bias_mean = nn.Parameter(torch.Tensor(num_features).to(device))
+            self.bias_logvar = nn.Parameter(torch.Tensor(num_features).to(device))
+            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar, device)
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -196,9 +196,9 @@ class _BatchNormBayesian(BayesianNN):
 
 
 class BayesianBatchNorm2D(_BatchNormBayesian):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, num_features, device, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super().__init__(num_features, eps, momentum, affine=affine,
+        super().__init__(num_features, device, eps, momentum, affine=affine,
                          track_running_stats=track_running_stats)
 
     def _check_input_dim(self, x):
@@ -208,10 +208,11 @@ class BayesianBatchNorm2D(_BatchNormBayesian):
 
 
 class BatchNorm2DF(nn.BatchNorm2d, BayesianNN):
-    def __init__(self,  num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self,  num_features, device, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
         super().__init__(num_features, eps, momentum, affine,
                          track_running_stats)
+        self.to(device)
 
     def forward(self, x, kl):
         exponential_average_factor = 0.0
@@ -246,24 +247,27 @@ class FlattenLayer(BayesianNN):
 
 
 class BayesianLinear(BayesianNN):
-    def __init__(self, n_in, n_out, bias=True, pi=.5, sigma1=math.exp(0), sigma2=math.exp(-6)):
+    def __init__(self, n_in, n_out, device, bias=True, pi=.5, sigma1=math.exp(0), sigma2=math.exp(-6)):
         super().__init__()
         self.n_in = n_in
         self.n_out = n_out
         self.pi = pi
         self.sigma1 = sigma1
         self.sigma2 = sigma2
-        self.weight_mean = nn.Parameter(torch.Tensor(n_out, n_in))
-        self.weight_logvar = nn.Parameter(torch.Tensor(n_out, n_in))
-        self.weight = NormalPosterior(self.weight_mean, self.weight_logvar)
-        self.prior = ScaleMixtureGaussian(pi=pi, sigma1=sigma1, sigma2=sigma2)
+        self.weight_mean = nn.Parameter(torch.Tensor(n_out, n_in).to(device))
+        self.weight_logvar = nn.Parameter(torch.Tensor(n_out, n_in).to(device))
+        self.prior = ScaleMixtureGaussian(pi=pi, sigma1=sigma1, sigma2=sigma2, device=device)
+        self.bias = bias
         if bias:
-            self.bias_mean = nn.Parameter(torch.Tensor(n_out, ))
-            self.bias_logvar = nn.Parameter(torch.Tensor(n_out, ))
-            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar)
+            self.bias_mean = nn.Parameter(torch.Tensor(n_out, ).to(device))
+            self.bias_logvar = nn.Parameter(torch.Tensor(n_out, ).to(device))
+
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
+        self.weight = NormalPosterior(self.weight_mean, self.weight_logvar, device)
+        if bias:
+            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar, device)
 
     def reset_parameters(self):
         stv = 10 / (self.n_in ** .5)
@@ -310,7 +314,7 @@ class BayesianLinear(BayesianNN):
 
 class _BayesianConvnd(BayesianNN):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, output_padding, groups, bias, pi, sigma1, sigma2):
+                 padding, dilation, output_padding, groups, bias, pi, sigma1, sigma2, device):
         super(_BayesianConvnd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -328,18 +332,19 @@ class _BayesianConvnd(BayesianNN):
         self.dilation = dilation
         self.output_padding = output_padding
         self.groups = groups
-        self.conv_mean = nn.Parameter(torch.Tensor(out_channels, in_channels // groups, *kernel_size))
+        self.conv_mean = nn.Parameter(torch.Tensor(out_channels, in_channels // groups, *kernel_size).to(device))
         self.conv_logvar = nn.Parameter(torch.Tensor(out_channels,
-                                                     in_channels // groups, *kernel_size))
-        self.conv = NormalPosterior(self.conv_mean, self.conv_logvar)
-        self.prior = ScaleMixtureGaussian(pi=self.pi, sigma1=self.sigma1, sigma2=self.sigma2)
+                                                     in_channels // groups, *kernel_size).to(device))
+        self.prior = ScaleMixtureGaussian(pi=self.pi, sigma1=self.sigma1, sigma2=self.sigma2, device=device)
         if bias:
             self.bias_mean = nn.Parameter(torch.Tensor(out_channels).normal_(0, .1))
             self.bias_logvar = nn.Parameter(torch.Tensor(out_channels).uniform_(-5, -4))
-            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar)
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
+        self.conv = NormalPosterior(self.conv_mean, self.conv_logvar, device)
+        if bias:
+            self.bias = NormalPosterior(self.bias_mean, self.bias_logvar, device)
 
     def reset_parameters(self):
         n = self.in_channels
@@ -362,7 +367,7 @@ class _BayesianConvnd(BayesianNN):
 
 
 class BayesianConv2d(_BayesianConvnd):
-    def __init__(self, in_channels, out_channels, kernel_size,
+    def __init__(self, in_channels, out_channels, kernel_size, device,
                  stride=1, padding=0, dilation=1, groups=1, bias=None,
                  pi=.5, sigma1=math.exp(0), sigma2=math.exp(-6)):
         kernel_size = _pair(kernel_size)
@@ -371,7 +376,7 @@ class BayesianConv2d(_BayesianConvnd):
         dilation = _pair(dilation)
 
         super().__init__(in_channels, out_channels, kernel_size,
-                         stride, padding, dilation, _pair(0), groups, bias, pi, sigma1, sigma2)
+                         stride, padding, dilation, _pair(0), groups, bias, pi, sigma1, sigma2, device)
 
     def convprobforward(self, x, kl):
         if self.mle:

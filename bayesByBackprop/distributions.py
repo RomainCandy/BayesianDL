@@ -13,17 +13,17 @@ class Posterior:
 
 
 class NormalPosterior(Posterior):
-    def __init__(self, mu, rho):
-        self.mu = mu
-        self.rho = rho
-        self.normal = Normal(0, 1)
+    def __init__(self, mu, rho, device):
+        self.mu = mu.to(device)
+        self.rho = rho.to(device)
+        self.normal = Normal(torch.zeros(1).to(device), torch.ones(1).to(device))
 
     @property
     def sigma(self):
         return torch.log1p(self.rho.exp())
 
     def sample(self):
-        eps = self.normal.sample(self.rho.shape)
+        eps = self.normal.sample(self.rho.shape).squeeze(-1)
         return self.mu + self.sigma * eps
 
     def log_prob(self, inp):
@@ -38,10 +38,17 @@ class Prior:
 
 
 class ScaleMixtureGaussian(Prior):
-    def __init__(self, pi, sigma1, sigma2):
+    def __init__(self, pi, sigma1, sigma2, device):
         self.pi = pi
-        self.sigma1 = sigma1
-        self.sigma2 = sigma2
+        if isinstance(sigma1, float):
+            self.sigma1 = torch.Tensor([sigma1]).to(device)
+        else:
+            self.sigma1 = sigma1.to(device)
+        if isinstance(sigma2, float):
+            self.sigma1 = torch.Tensor([sigma2]).to(device)
+        else:
+            self.sigma2 = sigma2.to(device)
+        # self.sigma2 = sigma2.to(device)
         self.normal1 = Normal(0, sigma1)
         self.normal2 = Normal(0, sigma2)
 
@@ -54,9 +61,9 @@ class ScaleMixtureGaussian(Prior):
 
 class FixedNormal(Prior):
     # takes mu and logvar as float values and assumes they are shared across all weights
-    def __init__(self, mu, logvar):
-        self.mu = mu
-        self.logvar = logvar
+    def __init__(self, mu, logvar, device):
+        self.mu = mu.to(device)
+        self.logvar = logvar.to(device)
         super(FixedNormal, self).__init__()
 
     def log_prob(self, x):
@@ -65,8 +72,8 @@ class FixedNormal(Prior):
 
 
 if __name__ == '__main__':
-    pr = ScaleMixtureGaussian(pi=1, sigma1=math.exp(-2), sigma2=math.exp(-6))
-    pr2 = FixedNormal(0, -3)
+    pr = ScaleMixtureGaussian(pi=1, sigma1=math.exp(-2), sigma2=math.exp(-6), device="cpu")
+    pr2 = FixedNormal(0, -3, "cpu")
     data = torch.randn(10)
     print(pr.log_prob(data))
     print(pr2.log_prob(data).sum())

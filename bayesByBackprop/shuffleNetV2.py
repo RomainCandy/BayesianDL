@@ -29,20 +29,20 @@ class SplitBlock(BayesianNN):
 
 
 class BasicBlock(BayesianNN):
-    def __init__(self, in_channels, split_ratio=0.5):
+    def __init__(self, in_channels, device, split_ratio=0.5):
         super(BasicBlock, self).__init__()
         self.split = SplitBlock(split_ratio)
         in_channels = int(in_channels * split_ratio)
         self.conv = BayesianSequential(
-            BayesianConv2d(in_channels, in_channels, kernel_size=1, bias=False),
-            BayesianBatchNorm2D(in_channels),
+            BayesianConv2d(in_channels, in_channels, kernel_size=1, bias=False, device=device),
+            BayesianBatchNorm2D(in_channels, device=device),
             BayesianReLU(),
             BayesianConv2d(in_channels, in_channels,
-                           kernel_size=3, stride=1, padding=1, groups=in_channels, bias=False),
-            BayesianBatchNorm2D(in_channels),
+                           kernel_size=3, stride=1, padding=1, groups=in_channels, bias=False, device=device),
+            BayesianBatchNorm2D(in_channels, device=device),
             BayesianReLU(),
-            BayesianConv2d(in_channels, in_channels, kernel_size=1, bias=False),
-            BayesianBatchNorm2D(in_channels),
+            BayesianConv2d(in_channels, in_channels, kernel_size=1, bias=False, device=device),
+            BayesianBatchNorm2D(in_channels, device=device),
             BayesianReLU())
         self.shuffle = ShuffleBlock()
 
@@ -55,31 +55,31 @@ class BasicBlock(BayesianNN):
 
 
 class DownBlock(BayesianNN):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, device):
         super(DownBlock, self).__init__()
         mid_channels = out_channels // 2
         # left
         self.left = BayesianSequential(
             BayesianConv2d(in_channels, in_channels,
-                           kernel_size=3, stride=2, padding=1, groups=in_channels, bias=False),
-            BayesianBatchNorm2D(in_channels),
+                           kernel_size=3, stride=2, padding=1, groups=in_channels, bias=False, device=device),
+            BayesianBatchNorm2D(in_channels, device=device),
             BayesianConv2d(in_channels, mid_channels,
-                           kernel_size=1, bias=False),
-            BayesianBatchNorm2D(mid_channels),
+                           kernel_size=1, bias=False, device=device),
+            BayesianBatchNorm2D(mid_channels, device=device),
             BayesianReLU()
         )
         # right
         self.right = BayesianSequential(
             BayesianConv2d(in_channels, mid_channels,
-                           kernel_size=1, bias=False),
-            BayesianBatchNorm2D(mid_channels),
+                           kernel_size=1, bias=False, device=device),
+            BayesianBatchNorm2D(mid_channels, device=device),
             BayesianReLU(),
             BayesianConv2d(mid_channels, mid_channels,
-                           kernel_size=3, stride=2, padding=1, groups=mid_channels, bias=False),
-            BayesianBatchNorm2D(mid_channels),
+                           kernel_size=3, stride=2, padding=1, groups=mid_channels, bias=False, device=device),
+            BayesianBatchNorm2D(mid_channels, device=device),
             BayesianConv2d(mid_channels, mid_channels,
-                           kernel_size=1, bias=False),
-            BayesianBatchNorm2D(mid_channels),
+                           kernel_size=1, bias=False, device=device),
+            BayesianBatchNorm2D(mid_channels, device=device),
             BayesianReLU(),
 
         )
@@ -97,14 +97,14 @@ class DownBlock(BayesianNN):
 
 
 class ShuffleNetV2(BayesianModel):
-    def __init__(self, net_size, samples=5):
+    def __init__(self, net_size, device, samples=5):
         super(ShuffleNetV2, self).__init__(samples)
         out_channels = configs[net_size]['out_channels']
         num_blocks = configs[net_size]['num_blocks']
-
+        self.device = device
         self.conv1 = BayesianSequential(
-            BayesianConv2d(3, 24, kernel_size=3, stride=1, padding=1, bias=False),
-            BayesianBatchNorm2D(24),
+            BayesianConv2d(3, 24, kernel_size=3, stride=1, padding=1, bias=False, device=device),
+            BayesianBatchNorm2D(24, device=device),
             BayesianReLU()
         )
         self.in_channels = 24
@@ -114,18 +114,18 @@ class ShuffleNetV2(BayesianModel):
 
         self.conv2 = BayesianSequential(
             BayesianConv2d(out_channels[2], out_channels[3],
-                           kernel_size=1, stride=1, padding=0, bias=False),
-            BayesianBatchNorm2D(out_channels[3]),
+                           kernel_size=1, stride=1, padding=0, bias=False, device=device),
+            BayesianBatchNorm2D(out_channels[3], device=device),
             BayesianReLU()
         )
-        self.linear = BayesianLinear(out_channels[3], 10)
+        self.linear = BayesianLinear(out_channels[3], 10, device=device)
 
         self.name = f"ShuffleNetV2-{net_size}"
 
     def _make_layer(self, out_channels, num_blocks):
-        layers = [DownBlock(self.in_channels, out_channels)]
+        layers = [DownBlock(self.in_channels, out_channels, device=self.device)]
         for i in range(num_blocks):
-            layers.append(BasicBlock(out_channels))
+            layers.append(BasicBlock(out_channels, device=self.device))
             self.in_channels = out_channels
         return BayesianSequential(*layers)
 
@@ -142,8 +142,8 @@ class ShuffleNetV2(BayesianModel):
 
     def forward(self, x):
         batch_size = x.size(0)
-        outputs = torch.zeros(self.samples, batch_size, 10)
-        kls = torch.zeros(self.samples)
+        outputs = torch.zeros(self.samples, batch_size, 10).to(self.device)
+        kls = torch.zeros(self.samples).to(self.device)
         for i in range(self.samples):
             outputs[i], kls[i] = self.forward_once(x)
         return outputs.mean(0), kls.mean(0)
@@ -175,7 +175,7 @@ configs = {
 
 def test():
     import torch
-    model = ShuffleNetV2(net_size=0.5)
+    model = ShuffleNetV2(net_size=0.5, device="cpu")
     print(sum(p.numel() for p in model.parameters() if p.requires_grad))
     data = torch.rand(1, 3, 32, 32)
     print(model(data))
